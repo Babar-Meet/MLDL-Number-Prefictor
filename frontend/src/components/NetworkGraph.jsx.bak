@@ -1,0 +1,479 @@
+import { useMemo } from "react";
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+/* ── 3B1B-style color helpers ── */
+function nodeColor(value) {
+  const t = clamp(value ?? 0, 0, 1);
+  // inactive = dark gray (#333), active = bright green (#00ff9d)
+  const r = Math.round(51 + t * (0 - 51));
+  const g = Math.round(51 + t * (255 - 51));
+  const b = Math.round(51 + t * (157 - 51));
+  return `rgb(${r},${g},${b})`;
+}
+
+function nodeGlow(value) {
+  const t = clamp(value ?? 0, 0, 1);
+  return t > 0.15
+    ? `0 0 ${4 + t * 10}px rgba(0,255,157,${0.2 + t * 0.55})`
+    : "none";
+}
+
+function edgeColor(value) {
+  const mag = clamp(Math.abs(value ?? 0) * 3, 0, 1);
+  if (value >= 0) {
+    return `rgba(0,255,157,${0.04 + mag * 0.35})`;
+  }
+  return `rgba(239,68,68,${0.04 + mag * 0.3})`;
+}
+
+function edgeWidth(value) {
+  return 0.4 + clamp(Math.abs(value ?? 0) * 4, 0, 2.2);
+}
+
+/* ── Position builders ── */
+// Input: 28×28 compact grid of small circles
+function buildInputPositions() {
+  const positions = [];
+  const startX = 80;
+  const startY = 55;
+  const spacing = 6.8;
+  for (let row = 0; row < 28; row += 1) {
+    for (let col = 0; col < 28; col += 1) {
+      positions.push({ x: startX + col * spacing, y: startY + row * spacing });
+    }
+  }
+  return positions;
+}
+
+// Hidden/Output: vertical columns of circles
+function buildColumnPositions(size, x, startY, endY) {
+  return Array.from({ length: size }, (_, i) => ({
+    x,
+    y: startY + (i / Math.max(size - 1, 1)) * (endY - startY),
+  }));
+}
+
+/* ── Dense connection sampling ──
+   Drawing ALL connections (784×96 = 75k lines) would kill performance.
+   We sample a representative set of connections to create the dense-web look. */
+function buildDenseConnections(
+  sourcePositions,
+  targetPositions,
+  sourceValues,
+  targetValues,
+  maxEdges,
+) {
+  const edges = [];
+  const sLen = sourcePositions.length;
+  const tLen = targetPositions.length;
+
+  // Strategy: for each target neuron, pick a few source neurons (weighted towards active ones)
+  const perTarget = Math.max(2, Math.ceil(maxEdges / tLen));
+
+  for (let t = 0; t < tLen; t++) {
+    const step = Math.max(1, Math.floor(sLen / perTarget));
+    for (let s = 0; s < sLen; s += step) {
+      const sourceAct = sourceValues ? (sourceValues[s] ?? 0) : 0;
+      const targetAct = targetValues ? (targetValues[t] ?? 0) : 0;
+      const signal = sourceAct * targetAct;
+      edges.push({
+        sx: sourcePositions[s].x,
+        sy: sourcePositions[s].y,
+        tx: targetPositions[t].x,
+        ty: targetPositions[t].y,
+        signal,
+      });
+    }
+  }
+  return edges;
+}
+
+export default function NetworkGraph({ model, analysis, edgeRevealProgress }) {
+  const inputPositions = buildInputPositions();
+  const hidden1Positions = buildColumnPositions(96, 430, 32, 310);
+  const hidden2Positions = buildColumnPositions(48, 760, 44, 298);
+  const outputPositions = buildColumnPositions(10, 1084, 58, 286);
+
+  const inputGrid =
+    analysis?.layers?.[0]?.grid ??
+    Array.from({ length: 28 }, () => Array(28).fill(0));
+  const hidden1 = analysis?.layers?.[1]?.activations ?? Array(96).fill(0);
+  const hidden2 = analysis?.layers?.[2]?.activations ?? Array(48).fill(0);
+  const output = analysis?.prediction?.probabilities ?? Array(10).fill(0);
+
+  const staticEdges = model
+    ? [
+        ...(model.weights?.[0]?.topConnections ?? [])
+          .slice(0, 18)
+          .map((edge) => ({ ...edge, layer: "input_to_hidden_1" })),
+        ...(model.weights?.[1]?.topConnections ?? [])
+          .slice(0, 18)
+          .map((edge) => ({ ...edge, layer: "hidden_1_to_hidden_2" })),
+        ...(model.weights?.[2]?.topConnections ?? [])
+          .slice(0, 14)
+          .map((edge) => ({ ...edge, layer: "hidden_2_to_output" })),
+      ]
+    : [];
+
+  const dynamicEdges = analysis
+    ? [
+        ...(analysis.dynamicEdges?.input_to_hidden_1 ?? []).map((edge) => ({
+          ...edge,
+          layer: "input_to_hidden_1",
+          value: edge.signal,
+        })),
+        ...(analysis.dynamicEdges?.hidden_1_to_hidden_2 ?? []).map((edge) => ({
+          ...edge,
+          layer: "hidden_1_to_hidden_2",
+          value: edge.signal,
+        })),
+        ...(analysis.dynamicEdges?.hidden_2_to_output ?? []).map((edge) => ({
+          ...edge,
+          layer: "hidden_2_to_output",
+          value: edge.signal,
+        })),
+      ]
+    : [];
+
+  // Progressive edge reveal: edgeRevealProgress 0→1 reveals edges layer-by-layer
+  const isShowcase = edgeRevealProgress != null;
+
+  function getLayerProgress(layerIndex) {
+    if (!isShowcase) return 1;
+    // 0-0.33 = layer 0, 0.33-0.66 = layer 1, 0.66-1.0 = layer 2
+    const layerStart = layerIndex / 3;
+    const layerEnd = (layerIndex + 1) / 3;
+    return clamp(
+      (edgeRevealProgress - layerStart) / (layerEnd - layerStart),
+      0,
+      1,
+    );
+  }
+
+  function getEdgeVisibility(layerName, indexInLayer, totalInLayer) {
+    const layerIndex =
+      layerName === "input_to_hidden_1"
+        ? 0
+        : layerName === "hidden_1_to_hidden_2"
+          ? 1
+          : 2;
+    const progress = getLayerProgress(layerIndex);
+    const threshold = totalInLayer > 1 ? indexInLayer / (totalInLayer - 1) : 0;
+    if (progress <= threshold) return { visible: false };
+    // How "fresh" is this edge (just appeared vs fully settled)
+    const freshness = clamp((progress - threshold) * 4, 0, 1);
+    return { visible: true, freshness };
+  }
+
+  // Group dynamic edges by layer for counting
+  const dynamicByLayer = {};
+  for (const edge of dynamicEdges) {
+    if (!dynamicByLayer[edge.layer]) dynamicByLayer[edge.layer] = [];
+    dynamicByLayer[edge.layer].push(edge);
+  }
+
+  // Layer label progress for visual indicator
+  const layerLabels = [
+    { x: 58, label: "INPUT 784", layerIdx: -1 },
+    { x: 430, label: "HIDDEN 96", layerIdx: 0 },
+    { x: 760, label: "HIDDEN 48", layerIdx: 1 },
+    { x: 1084, label: "OUTPUT 10", layerIdx: 2 },
+  ];
+
+  // Node reveal: nodes light up when their incoming layer starts revealing
+  function getNodeOpacity(layerIdx) {
+    if (!isShowcase) return 1;
+    if (layerIdx < 0) return edgeRevealProgress > 0 ? 1 : 0.3;
+    return getLayerProgress(layerIdx) > 0 ? 1 : 0.3;
+  }
+
+  return (
+    <div className="glass-panel overflow-hidden p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <span className="section-label">
+          <span className="inline-block h-2 w-2 rounded-full bg-[#3b82f6] shadow-[0_0_6px_rgba(59,130,246,0.5)]" />
+          Network Flow
+        </span>
+        <div className="flex items-center gap-2">
+          {isShowcase && (
+            <span className="showcase-layer-badge">
+              {edgeRevealProgress < 0.33
+                ? "Layer 1 — Input → Hidden₁"
+                : edgeRevealProgress < 0.66
+                  ? "Layer 2 — Hidden₁ → Hidden₂"
+                  : "Layer 3 — Hidden₂ → Output"}
+            </span>
+          )}
+          <span className="rounded-lg border border-white/6 bg-white/3 px-2.5 py-1 text-[0.65rem] font-medium text-white/40 mono">
+            {model ? model.architecture.join(" → ") : "loading"}
+          </span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-white/5 bg-[#060a12] p-3">
+        <svg viewBox="0 0 1140 352" className="min-w-[960px]">
+          <defs>
+            <linearGradient
+              id="network-sheen"
+              x1="0%"
+              y1="0%"
+              x2="100%"
+              y2="0%"
+            >
+              <stop offset="0%" stopColor="rgba(6,214,160,0.015)" />
+              <stop offset="50%" stopColor="rgba(124,58,237,0.02)" />
+              <stop offset="100%" stopColor="rgba(59,130,246,0.015)" />
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="2" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+            <filter id="edge-glow-filter">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+          </defs>
+
+          <rect
+            x="0"
+            y="0"
+            width="1140"
+            height="352"
+            rx="16"
+            fill="url(#network-sheen)"
+          />
+
+          {/* Static edges — only when not in showcase or fully revealed */}
+          {(!isShowcase || edgeRevealProgress >= 1) &&
+            staticEdges.map((edge, index) => {
+              let source;
+              let target;
+
+              if (edge.layer === "input_to_hidden_1") {
+                source = inputPositions[edge.from];
+                target = hidden1Positions[edge.to];
+              } else if (edge.layer === "hidden_1_to_hidden_2") {
+                source = hidden1Positions[edge.from];
+                target = hidden2Positions[edge.to];
+              } else {
+                source = hidden2Positions[edge.from];
+                target = outputPositions[edge.to];
+              }
+
+              return (
+                <line
+                  key={`static-${edge.layer}-${index}`}
+                  x1={source.x}
+                  y1={source.y}
+                  x2={target.x}
+                  y2={target.y}
+                  stroke={edgeColor(edge.weight)}
+                  strokeWidth={0.8}
+                  opacity={0.12}
+                />
+              );
+            })}
+
+          {/* Dynamic edges — with progressive reveal in showcase mode */}
+          {dynamicEdges.map((edge, index) => {
+            const layerEdges = dynamicByLayer[edge.layer] ?? [];
+            const indexInLayer = layerEdges.indexOf(edge);
+            const vis = getEdgeVisibility(
+              edge.layer,
+              indexInLayer,
+              layerEdges.length,
+            );
+
+            if (isShowcase && !vis.visible) return null;
+
+            let source;
+            let target;
+
+            if (edge.layer === "input_to_hidden_1") {
+              source = inputPositions[edge.from];
+              target = hidden1Positions[edge.to];
+            } else if (edge.layer === "hidden_1_to_hidden_2") {
+              source = hidden1Positions[edge.from];
+              target = hidden2Positions[edge.to];
+            } else {
+              source = hidden2Positions[edge.from];
+              target = outputPositions[edge.to];
+            }
+
+            const lineLen = Math.hypot(
+              target.x - source.x,
+              target.y - source.y,
+            );
+            const isNewEdge = isShowcase && vis.freshness < 1;
+
+            return (
+              <line
+                key={`dynamic-${edge.layer}-${index}`}
+                className={isNewEdge ? "edge-reveal" : "network-edge"}
+                x1={source.x}
+                y1={source.y}
+                x2={target.x}
+                y2={target.y}
+                stroke={edgeColor(edge.value)}
+                strokeWidth={1 + clamp((edge.magnitude ?? 0) * 16, 0, 4)}
+                filter={isNewEdge ? "url(#edge-glow-filter)" : undefined}
+                style={
+                  isShowcase
+                    ? {
+                        strokeDasharray: lineLen,
+                        strokeDashoffset: isNewEdge
+                          ? lineLen * (1 - vis.freshness)
+                          : 0,
+                        transition:
+                          "stroke-dashoffset 0.6s ease-out, opacity 0.4s ease",
+                        opacity: 0.3 + vis.freshness * 0.7,
+                      }
+                    : undefined
+                }
+              />
+            );
+          })}
+
+          {/* Input grid nodes */}
+          {inputPositions.map((point, index) => {
+            const row = Math.floor(index / 28);
+            const col = index % 28;
+            const value = inputGrid[row][col];
+            return (
+              <rect
+                key={`input-${index}`}
+                x={point.x - 2.6}
+                y={point.y - 2.6}
+                width="5.2"
+                height="5.2"
+                rx="1"
+                fill={nodeColor(value)}
+                style={{
+                  opacity: getNodeOpacity(-1),
+                  transition: "opacity 0.5s ease",
+                }}
+              />
+            );
+          })}
+
+          {hidden1Positions.map((point, index) => (
+            <circle
+              key={`hidden1-${index}`}
+              cx={point.x}
+              cy={point.y}
+              r={3.4}
+              fill={nodeColor(hidden1[index])}
+              style={{
+                opacity: getNodeOpacity(0),
+                transition: "opacity 0.5s ease",
+              }}
+            />
+          ))}
+
+          {hidden2Positions.map((point, index) => (
+            <circle
+              key={`hidden2-${index}`}
+              cx={point.x}
+              cy={point.y}
+              r={4.8}
+              fill={nodeColor(hidden2[index])}
+              style={{
+                opacity: getNodeOpacity(1),
+                transition: "opacity 0.5s ease",
+              }}
+            />
+          ))}
+
+          {outputPositions.map((point, index) => (
+            <g
+              key={`output-${index}`}
+              style={{
+                opacity: getNodeOpacity(2),
+                transition: "opacity 0.5s ease",
+              }}
+            >
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={13}
+                fill={nodeColor(output[index])}
+                stroke="rgba(255,255,255,0.12)"
+                strokeWidth="1"
+                filter={output[index] > 0.3 ? "url(#glow)" : undefined}
+              />
+              <text
+                x={point.x}
+                y={point.y + 3.5}
+                textAnchor="middle"
+                fill="#f0ece4"
+                fontSize="10"
+                fontWeight="700"
+                fontFamily="JetBrains Mono, monospace"
+              >
+                {index}
+              </text>
+            </g>
+          ))}
+
+          {/* Signal flow arrow during showcase */}
+          {isShowcase && edgeRevealProgress > 0 && edgeRevealProgress < 1 && (
+            <g className="signal-pulse">
+              <circle
+                cx={
+                  edgeRevealProgress < 0.33
+                    ? 58 + edgeRevealProgress * 3 * (430 - 58)
+                    : edgeRevealProgress < 0.66
+                      ? 430 + (edgeRevealProgress - 0.33) * 3 * (760 - 430)
+                      : 760 + (edgeRevealProgress - 0.66) * 3 * (1084 - 760)
+                }
+                cy="176"
+                r="6"
+                fill="#06d6a0"
+                opacity="0.7"
+              >
+                <animate
+                  attributeName="r"
+                  values="4;8;4"
+                  dur="1.2s"
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="opacity"
+                  values="0.7;0.3;0.7"
+                  dur="1.2s"
+                  repeatCount="indefinite"
+                />
+              </circle>
+            </g>
+          )}
+
+          {layerLabels.map((entry) => {
+            const active =
+              isShowcase &&
+              entry.layerIdx >= 0 &&
+              getLayerProgress(entry.layerIdx) > 0;
+            return (
+              <text
+                key={entry.label}
+                x={entry.x}
+                y="342"
+                fill={active ? "rgba(6,214,160,0.7)" : "rgba(255,255,255,0.28)"}
+                fontSize="9"
+                textAnchor="middle"
+                letterSpacing="0.2em"
+                fontFamily="JetBrains Mono, monospace"
+                fontWeight="600"
+                style={{ transition: "fill 0.5s ease" }}
+              >
+                {entry.label}
+              </text>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}

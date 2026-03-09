@@ -1,0 +1,7 @@
+{
+  "updatedAt": "2026-03-09T08:18:22.763537+00:00",
+  "currentBestModel": "B:\\_Git\\DEV\\Babar-Meet\\MLDL Number Prefictor\\backend\\mnist_visualizer_model.pth",
+  "previousBestModel": "B:\\_Git\\DEV\\Babar-Meet\\MLDL Number Prefictor\\backend\\mnist_visualizer_model_previous_best.pth",
+  "currentBestAccuracy": 0.9788,
+  "previousBestAccuracy": 0.9785
+}
