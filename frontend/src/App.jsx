@@ -506,6 +506,131 @@ function App() {
     startTransition,
   ]);
 
+  const runShowcaseForInput = useCallback(async () => {
+    if (showcaseActive) {
+      stopShowcase();
+      return;
+    }
+
+    showcaseCancelRef.current = false;
+    setShowcaseActive(true);
+    setEdgeRevealProgress(null);
+    setEdge3DProgress(null);
+
+    const cancelled = () => showcaseCancelRef.current;
+
+    function setStep(index) {
+      if (cancelled()) return false;
+      setShowcaseStep(index);
+      setShowcaseCaption(SHOWCASE_STEPS[index]?.description ?? "");
+      return true;
+    }
+
+    try {
+      // Skip steps 0-1 (prepare + draw) — use current grid as-is
+      // Step 2: Analyze current input
+      if (!setStep(2)) return;
+      scrollToRef(predictionSectionRef);
+      if (socket) {
+        try {
+          const response = await emitWithAck(socket, "analyze-digit", {
+            pixels: grid,
+            adjustments: { layerScales, outputBiasOffsets, targetDigit },
+            includeBackprop: backpropEnabled,
+          });
+          startTransition(() => {
+            setAnalysis(response.analysis);
+          });
+        } catch {
+          // continue
+        }
+      }
+      await sleep(1500);
+
+      // Steps 3-5: Progressive edge reveal
+      if (!setStep(3)) return;
+      scrollToRef(networkSectionRef);
+      await sleep(800);
+
+      const edgeSteps = 100;
+      const layerStepMap = [
+        { stepIndex: 3, start: 0, end: 0.33 },
+        { stepIndex: 4, start: 0.33, end: 0.66 },
+        { stepIndex: 5, start: 0.66, end: 1.0 },
+      ];
+
+      for (let s = 0; s <= edgeSteps; s++) {
+        if (cancelled()) return;
+        const progress = s / edgeSteps;
+        setEdgeRevealProgress(progress);
+        for (const layer of layerStepMap) {
+          if (progress >= layer.start && progress < layer.end + 0.01) {
+            setStep(layer.stepIndex);
+            break;
+          }
+        }
+        await sleep(60);
+      }
+      setEdgeRevealProgress(1);
+      await sleep(1000);
+
+      // Step 6: Prediction result
+      if (!setStep(6)) return;
+      scrollToRef(predictionSectionRef);
+      await sleep(2500);
+
+      // Step 7: Deep analysis
+      if (!setStep(7)) return;
+      scrollToRef(analysisSectionRef);
+      await sleep(3000);
+
+      // Step 8: 3D visualization
+      if (!setStep(8)) return;
+      setShow3D(true);
+      await sleep(400);
+      scrollToRef(scene3DRef);
+      await sleep(800);
+
+      const edge3DSteps = 60;
+      for (let s = 0; s <= edge3DSteps; s++) {
+        if (cancelled()) return;
+        setEdge3DProgress(s / edge3DSteps);
+        await sleep(80);
+      }
+      setEdge3DProgress(1);
+      await sleep(1000);
+
+      // Pipeline auto-play
+      scrollToRef(pipelineRef);
+      setPipelineAutoPlay(true);
+      await sleep(5 * 4500 + 1500);
+      setPipelineAutoPlay(false);
+
+      // Step 9: Complete
+      if (!setStep(9)) return;
+      await sleep(4000);
+    } finally {
+      if (!showcaseCancelRef.current) {
+        setShowcaseActive(false);
+        setShowcaseStep(-1);
+        setShowcaseCaption("");
+      }
+      setEdgeRevealProgress(null);
+      setEdge3DProgress(null);
+      setPipelineAutoPlay(false);
+    }
+  }, [
+    showcaseActive,
+    stopShowcase,
+    socket,
+    grid,
+    layerScales,
+    outputBiasOffsets,
+    targetDigit,
+    backpropEnabled,
+    startTransition,
+  ]);
+
   return (
     <main className="app-shell min-h-screen text-white">
       {/* Background orbs */}
@@ -697,12 +822,22 @@ function App() {
                   {isPending ? "Analyzing…" : "Analyze"}
                 </button>
                 <button
+                  className="btn-primary"
+                  onClick={runShowcaseForInput}
+                  disabled={showcaseActive}
+                >
+                  <Play size={14} />
+                  Showcase
+                </button>
+                <button
                   className="btn-secondary"
                   onClick={() => setGrid(createEmptyGrid())}
                 >
                   <RotateCcw size={14} />
                   Clear
                 </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
                 {Array.from({ length: 10 }, (_, digit) => (
                   <button
                     key={digit}
