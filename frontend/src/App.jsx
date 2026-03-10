@@ -479,7 +479,7 @@ function App() {
       // Step 8.5: Pipeline auto-play
       scrollToRef(pipelineRef);
       setPipelineAutoPlay(true);
-      await sleep(4 * 4500 + 1500); // wait for all 4 pipeline steps
+      await sleep(5 * 4500 + 1500); // wait for all 5 pipeline steps
       setPipelineAutoPlay(false);
 
       // Step 9: Complete
@@ -667,7 +667,7 @@ function App() {
           viewport={{ once: true, margin: "-40px" }}
           variants={stagger}
         >
-          {/* Left column: Canvas + Actions + Controls */}
+          {/* Left column: Canvas + Actions */}
           <div className="flex flex-col gap-8">
             <motion.div variants={fadeUp} ref={canvasSectionRef}>
               <DigitCanvas
@@ -714,7 +714,10 @@ function App() {
                 ))}
               </div>
             </motion.div>
+          </div>
 
+          {/* Right column: Controls + Live Training */}
+          <div className="flex flex-col gap-8">
             {/* Controls */}
             <motion.div variants={fadeUp} className="glass-panel p-5 space-y-5">
               <div className="flex items-center gap-2">
@@ -934,109 +937,112 @@ function App() {
               </AnimatePresence>
             </motion.div>
           </div>
+        </motion.section>
 
-          {/* Right column: Prediction + Network */}
-          <div className="flex flex-col gap-8">
-            {/* Prediction display */}
-            <motion.div
-              ref={predictionSectionRef}
-              variants={scaleIn}
-              className="glass-panel glow-border p-6 sm:p-8"
-            >
-              <div className="flex items-center gap-2 mb-6">
-                <span className="section-label">
-                  <Zap size={11} />
-                  Prediction
-                </span>
+        {/* ═══ PREDICTION ═══ */}
+        <motion.div
+          ref={predictionSectionRef}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-40px" }}
+          variants={scaleIn}
+          className="glass-panel glow-border p-6 sm:p-8"
+        >
+          <div className="flex items-center gap-2 mb-6">
+            <span className="section-label">
+              <Zap size={11} />
+              Prediction
+            </span>
+          </div>
+
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+            {/* Orb */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={prediction?.digit ?? "empty"}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.8, opacity: 0 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 260,
+                  damping: 20,
+                }}
+                className="prediction-orb flex h-28 w-28 flex-shrink-0 items-center justify-center rounded-2xl text-5xl font-bold text-white"
+              >
+                {prediction?.digit ?? "–"}
+              </motion.div>
+            </AnimatePresence>
+
+            <div className="flex flex-col gap-3 w-full">
+              <div>
+                <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-white/30 mb-1">
+                  Confidence
+                </p>
+                <p className="text-3xl font-bold text-white mono">
+                  {prediction
+                    ? `${(prediction.confidence * 100).toFixed(1)}%`
+                    : "—"}
+                </p>
               </div>
+              <p className="text-xs leading-relaxed text-white/40">
+                The network highlights its dominant signal paths. Strongest
+                contributing hidden neurons are surfaced in the analysis below.
+              </p>
+            </div>
+          </div>
 
-              <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-                {/* Orb */}
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={prediction?.digit ?? "empty"}
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.8, opacity: 0 }}
-                    transition={{
-                      type: "spring",
-                      stiffness: 260,
-                      damping: 20,
-                    }}
-                    className="prediction-orb flex h-28 w-28 flex-shrink-0 items-center justify-center rounded-2xl text-5xl font-bold text-white"
-                  >
-                    {prediction?.digit ?? "–"}
-                  </motion.div>
-                </AnimatePresence>
-
-                <div className="flex flex-col gap-3 w-full">
-                  <div>
-                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-white/30 mb-1">
-                      Confidence
-                    </p>
-                    <p className="text-3xl font-bold text-white mono">
-                      {prediction
-                        ? `${(prediction.confidence * 100).toFixed(1)}%`
-                        : "—"}
-                    </p>
-                  </div>
-                  <p className="text-xs leading-relaxed text-white/40">
-                    The network highlights its dominant signal paths. Strongest
-                    contributing hidden neurons are surfaced in the analysis
-                    below.
+          {/* Backprop metrics */}
+          {deferredAnalysis?.backprop && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+            >
+              <div className="inner-card p-3.5">
+                <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
+                  Loss
+                </p>
+                <p className="mt-1 text-lg font-bold text-white mono">
+                  {deferredAnalysis.backprop.loss.toFixed(4)}
+                </p>
+              </div>
+              <div className="inner-card p-3.5">
+                <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
+                  Target
+                </p>
+                <p className="mt-1 text-lg font-bold text-white mono">
+                  {deferredAnalysis.backprop.targetDigit}
+                </p>
+              </div>
+              {deferredAnalysis.backprop.layerGradientNorms.map((norm, i) => (
+                <div key={i} className="inner-card p-3.5">
+                  <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
+                    ∇ Layer {i + 1}
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-white mono">
+                    {norm.toFixed(4)}
                   </p>
                 </div>
-              </div>
-
-              {/* Backprop metrics */}
-              {deferredAnalysis?.backprop && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-                >
-                  <div className="inner-card p-3.5">
-                    <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
-                      Loss
-                    </p>
-                    <p className="mt-1 text-lg font-bold text-white mono">
-                      {deferredAnalysis.backprop.loss.toFixed(4)}
-                    </p>
-                  </div>
-                  <div className="inner-card p-3.5">
-                    <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
-                      Target
-                    </p>
-                    <p className="mt-1 text-lg font-bold text-white mono">
-                      {deferredAnalysis.backprop.targetDigit}
-                    </p>
-                  </div>
-                  {deferredAnalysis.backprop.layerGradientNorms.map(
-                    (norm, i) => (
-                      <div key={i} className="inner-card p-3.5">
-                        <p className="text-[0.6rem] uppercase tracking-[0.1em] text-white/35">
-                          ∇ Layer {i + 1}
-                        </p>
-                        <p className="mt-1 text-lg font-bold text-white mono">
-                          {norm.toFixed(4)}
-                        </p>
-                      </div>
-                    ),
-                  )}
-                </motion.div>
-              )}
+              ))}
             </motion.div>
+          )}
+        </motion.div>
 
-            {/* Network graph */}
-            <motion.div variants={fadeUp} ref={networkSectionRef}>
-              <NetworkGraph
-                model={model}
-                analysis={deferredAnalysis}
-                edgeRevealProgress={edgeRevealProgress}
-              />
-            </motion.div>
-          </div>
-        </motion.section>
+        {/* ═══ NEURAL NETWORK ARCHITECTURE ═══ */}
+        <motion.div
+          ref={networkSectionRef}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-40px" }}
+          variants={fadeUp}
+        >
+          <NetworkGraph
+            model={model}
+            analysis={deferredAnalysis}
+            edgeRevealProgress={edgeRevealProgress}
+          />
+        </motion.div>
 
         {/* ═══ ACTIVATION ANALYSIS ═══ */}
         <motion.div

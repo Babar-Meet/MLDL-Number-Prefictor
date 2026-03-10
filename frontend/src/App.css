@@ -535,12 +535,21 @@
 /* ── Floating showcase panel ── */
 .showcase-panel {
   position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
   z-index: 1000;
-  width: min(520px, calc(100vw - 32px));
+  width: min(300px, calc(100vw - 32px));
   pointer-events: auto;
+}
+@media (max-width: 768px) {
+  .showcase-panel {
+    top: auto;
+    bottom: 16px;
+    right: 50%;
+    transform: translateX(50%);
+    width: min(400px, calc(100vw - 32px));
+  }
 }
 .showcase-panel-inner {
   padding: 20px 24px;

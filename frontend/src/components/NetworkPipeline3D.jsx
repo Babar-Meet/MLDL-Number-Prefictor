@@ -11,7 +11,7 @@ import { Play, Pause, SkipBack, SkipForward, RotateCcw } from "lucide-react";
  * Step 3 — Activation & Output: final prediction highlight
  */
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 const STEP_DURATION_MS = 4500;
 const LERP_SPEED = 2.5;
 
@@ -22,6 +22,7 @@ function clamp(v, lo, hi) {
 /* ── Camera targets per step ── */
 const CAMERA_TARGETS = [
   { pos: [0, 0, 14], look: [0, 0, 0] },
+  { pos: [12, 1.5, 4], look: [-2, 0, 0] },
   { pos: [4, 1, 13], look: [1, 0, 0] },
   { pos: [-1, 3, 18], look: [0, 0, -2] },
   { pos: [0, -2, 16], look: [0, -3, 0] },
@@ -465,6 +466,7 @@ export default function NetworkPipeline3D({ analysis, autoPlay = false }) {
 
   const STEP_LABELS = [
     "Input Matrix (28×28 pixels)",
+    "Side View — Pixel Heights",
     "Matrix × Weights Computation",
     "Hidden Layer Processing",
     "Activation → Prediction",
@@ -472,6 +474,7 @@ export default function NetworkPipeline3D({ analysis, autoPlay = false }) {
 
   const STEP_SUB = [
     "Each cell = one pixel value (0-1). The grid with 784 values is the network's input.",
+    "Viewing the input from the side reveals how each pixel's brightness maps to height — darker pixels stay flat while brighter ones bump up.",
     "Each pixel is multiplied by a learned weight. All products are summed, then activated with ReLU.",
     "Data flows through 96 → 48 neurons. Watch the signal propagation in real time.",
     "10 output neurons compete — the strongest activation wins and determines the predicted digit.",
@@ -561,73 +564,73 @@ export default function NetworkPipeline3D({ analysis, autoPlay = false }) {
 
           <CameraRig step={step} />
 
-          {/* Step 0 + 1: input matrix */}
+          {/* Step 0 + 1 + 2: input matrix */}
           <InputMatrix
             grid={inputGrid}
             position={[-2, 0, 0]}
-            visible={step <= 1}
-            stepProgress={progress}
+            visible={step <= 2}
+            stepProgress={step === 0 ? progress : 1}
           />
 
-          {/* Step 1: math overlay */}
+          {/* Step 2: math overlay */}
           <MathOverlay
             grid={inputGrid}
             position={[4.5, 0, 0]}
-            visible={step === 1}
+            visible={step === 2}
           />
 
-          {/* Step 2: hidden layers */}
+          {/* Step 3: hidden layers */}
           <ActivationBars
             values={hidden1}
             position={[0, 2.5, -3]}
             title="Hidden Layer 1 — 96 neurons (ReLU)"
-            visible={step >= 2}
+            visible={step >= 3}
             hueBase={0.55}
-            stepProgress={step === 2 ? progress : 1}
+            stepProgress={step === 3 ? progress : 1}
           />
           <ActivationBars
             values={hidden2}
             position={[0, -1, -3]}
             title="Hidden Layer 2 — 48 neurons (ReLU)"
-            visible={step >= 2}
+            visible={step >= 3}
             hueBase={0.75}
-            stepProgress={step === 2 ? clamp(progress * 2 - 0.4, 0, 1) : 1}
+            stepProgress={step === 3 ? clamp(progress * 2 - 0.4, 0, 1) : 1}
           />
 
-          {/* Step 3: output */}
+          {/* Step 4: output */}
           <ActivationBars
             values={output}
             position={[0, -4.5, -1]}
             title="Output Layer — 10 classes"
-            visible={step >= 3}
+            visible={step >= 4}
             hueBase={0.1}
-            stepProgress={step === 3 ? progress : 1}
+            stepProgress={step === 4 ? progress : 1}
             showLabels
           />
 
           <PredictionBadge
             output={output}
             position={[0, -7.5, -1]}
-            visible={step >= 3 && progress > 0.5}
+            visible={step >= 4 && progress > 0.5}
           />
 
           {/* Data-flow particles */}
           <DataParticles
             from={[-2, 0, 0]}
             to={[0, 2.5, -3]}
-            visible={step === 2 && progress < 0.6}
+            visible={step === 3 && progress < 0.6}
             count={40}
           />
           <DataParticles
             from={[0, 2.5, -3]}
             to={[0, -1, -3]}
-            visible={step === 2 && progress > 0.3}
+            visible={step === 3 && progress > 0.3}
             count={30}
           />
           <DataParticles
             from={[0, -1, -3]}
             to={[0, -4.5, -1]}
-            visible={step === 3 && progress < 0.6}
+            visible={step === 4 && progress < 0.6}
             count={25}
           />
 

@@ -43,7 +43,7 @@ export default function ActivationCharts({ model, analysis }) {
   const probabilityScale = scaleLinear().domain([0, 1]).range([0, 100]);
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+    <div className="flex flex-col gap-6">
       {/* Confidence distribution */}
       <div className="glass-panel p-5">
         <div className="mb-5 flex items-center justify-between gap-3">
