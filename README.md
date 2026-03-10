@@ -234,3 +234,389 @@ If your host supports multi-container deployments, use the included compose file
 ## Known tradeoff
 
 The optional 3D scene depends on Three.js and still ships a large vendor chunk. It is lazy-loaded and isolated from the main app bundle, which keeps the initial dashboard load much smaller even though the 3D feature remains heavyweight.
+
+---
+
+## Project Explanation
+
+This section provides a comprehensive explanation of the project architecture, how each component works, and all the parameters used throughout the system.
+
+### 1. Folder Structure
+
+```
+MLDL Number Prefictor/
+├── backend/                          # Server-side components
+│   ├── model_utils.py               # PyTorch ML model definition, training & inference
+│   ├── ml_server.py                  # FastAPI REST API server for ML inference
+│   ├── server.js                     # Express + Socket.IO bridge server
+│   ├── db.js                         # MongoDB Atlas database integration
+│   ├── requirements.txt              # Python dependencies (PyTorch, FastAPI, etc.)
+│   ├── package.json                  # Node.js dependencies
+│   ├── Dockerfile.ml                  # Docker configuration for ML service
+│   ├── Dockerfile.web                 # Docker configuration for web service
+│   ├── mnist_visualizer_model.pth    # Trained PyTorch model weights
+│   └── model_snapshot.json           # JSON export of model weights for frontend
+├── frontend/                          # React visualization dashboard
+│   ├── src/
+│   │   ├── App.jsx                  # Main React application
+│   │   ├── App.css                  # Styling with Tailwind CSS
+│   │   ├── index.css                # Global styles
+│   │   ├── main.jsx                 # React entry point
+│   │   ├── components/
+│   │   │   ├── DigitCanvas.jsx      # 28x28 drawing canvas for digit input
+│   │   │   ├── NetworkGraph.jsx     # 2D neural network visualization (SVG)
+│   │   │   ├── NetworkScene3D.jsx  # 3D network visualization (Three.js)
+│   │   │   ├── NetworkPipeline3D.jsx # Step-by-step 3D pipeline animation
+│   │   │   ├── ActivationCharts.jsx # Confidence bars & weight heatmap
+│   │   │   └── PredictionHistory.jsx # Past predictions display
+│   │   └── utils/
+│   │       └── digitGenerator.js    # Generate demo handwritten digits
+│   ├── package.json                  # Frontend dependencies
+│   ├── vite.config.js                # Vite build configuration
+│   └── index.html                    # HTML template
+├── data/MNIST/                       # MNIST dataset (downloaded on first run)
+├── docker-compose.yml                # Container orchestration
+├── train_model.py                    # Script to train the neural network
+├── improve_model.py                  # Advanced training with augmentation
+├── setup.bat                         # Windows setup script
+├── launch_showcase.bat               # Launch all services
+└── .env                              # Environment variables
+```
+
+### 2. Technologies & Libraries Used
+
+#### Backend (Python)
+
+| File                     | Technology       | Purpose                                                  |
+| ------------------------ | ---------------- | -------------------------------------------------------- |
+| `backend/model_utils.py` | **PyTorch 2.8+** | Neural network model definition, training, and inference |
+| `backend/model_utils.py` | **torchvision**  | MNIST dataset loading and transforms                     |
+| `backend/model_utils.py` | **NumPy**        | Numerical computations                                   |
+| `backend/ml_server.py`   | **FastAPI**      | REST API server with automatic docs                      |
+| `backend/ml_server.py`   | **Pydantic**     | Request/response data validation                         |
+| `backend/server.js`      | **Express 5**    | HTTP web server                                          |
+| `backend/server.js`      | **Socket.IO**    | Real-time bidirectional communication                    |
+| `backend/server.js`      | **Axios**        | HTTP client to call Python API                           |
+| `backend/db.js`          | **MongoDB**      | Persistent prediction history storage                    |
+
+#### Frontend (JavaScript/React)
+
+| File                    | Technology            | Purpose                           |
+| ----------------------- | --------------------- | --------------------------------- |
+| `frontend/package.json` | **React 19**          | UI framework                      |
+| `frontend/package.json` | **Vite 7**            | Build tool and development server |
+| `frontend/package.json` | **Tailwind CSS 4**    | Utility-first CSS framework       |
+| `frontend/package.json` | **React Three Fiber** | React renderer for Three.js       |
+| `frontend/package.json` | **Three.js**          | 3D graphics library               |
+| `frontend/package.json` | **Socket.IO Client**  | Real-time client for Socket.IO    |
+| `frontend/package.json` | **Axios**             | HTTP client for API calls         |
+| `frontend/package.json` | **D3 Scale**          | Data scaling for charts           |
+| `frontend/package.json` | **Framer Motion**     | Animation library                 |
+| `frontend/package.json` | **Lucide React**      | Icon library                      |
+
+### 3. Neural Network Architecture
+
+The model is a feedforward neural network trained on the MNIST dataset:
+
+```
+Input Layer (784) → Hidden Layer 1 (96) → Hidden Layer 2 (48) → Output Layer (10)
+```
+
+#### Layer Details
+
+| Layer             | Neurons  | Weights    | Biases  | Activation            |
+| ----------------- | -------- | ---------- | ------- | --------------------- |
+| Input → Hidden₁   | 784 → 96 | 75,264     | 96      | ReLU                  |
+| Hidden₁ → Hidden₂ | 96 → 48  | 4,608      | 48      | ReLU                  |
+| Hidden₂ → Output  | 48 → 10  | 480        | 10      | Softmax               |
+| **Total**         |          | **80,352** | **154** | **80,506 parameters** |
+
+### 4. How Socket.IO Works
+
+Socket.IO enables **real-time bidirectional communication** between the frontend and backend. Here's how it's used in this project:
+
+#### Connection Flow
+
+1. **Frontend connects** to Socket.IO server on page load
+2. **Server maintains** persistent connection with each client
+3. **Events flow** both directions without HTTP polling
+
+#### Socket Events Used
+
+| Event Name               | Direction       | Payload                                  | Description                              |
+| ------------------------ | --------------- | ---------------------------------------- | ---------------------------------------- |
+| `analyze-digit`          | Client → Server | `{pixels, adjustments, includeBackprop}` | Send drawn digit for analysis            |
+| `train-digit`            | Client → Server | `{pixels, adjustments, label}`           | Send digit with label for training       |
+| `prediction-history`     | Server → Client | `Array`                                  | Broadcast updated history to all clients |
+| `analysis-complete`      | Server → Client | `{analysis}`                             | Send analysis result back                |
+| `model-refresh-required` | Server → Client | -                                        | Notify clients model was updated         |
+
+#### Why Socket.IO?
+
+- **Instant updates**: No need to refresh or poll
+- **Broadcast support**: All connected clients see new predictions
+- **Acknowledgement support**: Can confirm message delivery
+- **Fallback**: Works with HTTP polling if WebSocket fails
+
+### 5. Key Functions and Parameters
+
+#### Python Backend
+
+##### `train_model()` in `backend/model_utils.py`
+
+Trains the neural network on MNIST data:
+
+```python
+def train_model(num_epochs: int = 6, batch_size: int = 128, learning_rate: float = 0.001)
+```
+
+| Parameter       | Default | Range       | Description                                     |
+| --------------- | ------- | ----------- | ----------------------------------------------- |
+| `num_epochs`    | 6       | 1-20        | Number of complete passes through training data |
+| `batch_size`    | 128     | 16-512      | Samples processed before weight update          |
+| `learning_rate` | 0.001   | 0.0001-0.01 | Adam optimizer step size                        |
+
+##### `analyze_digit()` in `backend/model_utils.py`
+
+Performs inference with optional gradient computation:
+
+```python
+def analyze_digit(
+    pixels: list[list[float]],      # 28x28 grid (values 0.0-1.0)
+    adjustments: dict | None = None, # Layer scaling & bias overrides
+    include_backprop: bool = True    # Whether to compute gradients
+) -> dict
+```
+
+Returns: `prediction`, `layers` (activations), `dynamicEdges`, `topContributors`, `backprop`, `weightStats`
+
+##### Adjustments Parameter
+
+```python
+adjustments = {
+    "layerScales": [1.0, 1.0, 1.0],        # Multiply weights per layer
+    "outputBiasOffsets": [0.0, 0.0, ...],     # Add to output neurons
+    "targetDigit": None                       # Force target for backprop
+}
+```
+
+| Adjustment             | Default | Range     | Effect                           |
+| ---------------------- | ------- | --------- | -------------------------------- |
+| `layerScales[0]`       | 1.0     | 0.45-1.75 | Scale input→hidden1 weights      |
+| `layerScales[1]`       | 1.0     | 0.45-1.75 | Scale hidden1→hidden2 weights    |
+| `layerScales[2]`       | 1.0     | 0.45-1.75 | Scale hidden2→output weights     |
+| `outputBiasOffsets[n]` | 0.0     | -2 to +2  | Add to output neuron n's value   |
+| `targetDigit`          | auto    | 0-9       | Force specific prediction target |
+
+#### FastAPI Endpoints
+
+##### `POST /analyze`
+
+Request:
+
+```json
+{
+  "pixels": [[0.0, 0.5, ...], ...],  // 28x28 grid
+  "adjustments": {
+    "layerScales": [1.0, 1.0, 1.0],
+    "outputBiasOffsets": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "targetDigit": null
+  },
+  "includeBackprop": true
+}
+```
+
+Response:
+
+```json
+{
+  "prediction": {
+    "digit": 5,
+    "confidence": 0.9234,
+    "probabilities": [0.001, 0.002, 0.001, 0.005, 0.002, 0.923, 0.001, 0.003, 0.050, 0.012]
+  },
+  "layers": [
+    {"name": "input", "size": 784, "activations": [...], "stats": {...}},
+    {"name": "hidden_1", "size": 96, "activations": [...], "stats": {...}},
+    {"name": "hidden_2", "size": 48, "activations": [...], "stats": {...}},
+    {"name": "output", "size": 10, "activations": [...], "stats": {...}}
+  ],
+  "dynamicEdges": {
+    "input_to_hidden_1": [...],
+    "hidden_1_to_hidden_2": [...],
+    "hidden_2_to_output": [...]
+  },
+  "backprop": {
+    "loss": 0.1234,
+    "targetDigit": 5,
+    "layerGradientNorms": [0.567, 0.234, 0.123, 0.089],
+    "strongestWeightUpdates": {...}
+  }
+}
+```
+
+##### `POST /train-step`
+
+Performs one step of backpropagation training:
+
+```json
+{
+  "pixels": [[0.0, 0.5, ...], ...],
+  "adjustments": {...},
+  "label": 5  // The correct digit (0-9)
+}
+```
+
+#### Frontend Canvas
+
+##### `DigitCanvas.jsx` - Drawing Parameters
+
+```javascript
+const GRID_SIZE = 28; // MNIST standard
+const CELL_SIZE = 12; // Rendered pixel size
+const CANVAS_SIZE = 336; // Total dimension
+
+// Brush parameters
+brushRadius: 1 - 4; // Size of drawing brush
+brushStrength: 0.4 - 1.5; // Drawing intensity
+```
+
+##### `digitGenerator.js` - Demo Digit Generation
+
+```javascript
+function buildHandwrittenDigit(digit)  // digit: 0-9
+// Returns: 28x28 grid array
+
+// Adds variation:
+// - Random rotation: ±0.2 radians
+// - Random scale: 0.8-1.1
+// - Gaussian blur for realistic look
+```
+
+### 6. Data Flow Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         USER'S BROWSER                               │
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐ │
+│  │  Drawing    │───▶│   React     │───▶│   Socket.IO Client      │ │
+│  │  Canvas     │    │   App.jsx   │    │   (Real-time)           │ │
+│  └─────────────┘    └─────────────┘    └───────────┬─────────────┘ │
+│                                                       │              │
+└───────────────────────────────────────────────────────┼──────────────┘
+                                                        │
+                           WebSocket Connection          │
+                                                        ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     EXPRESS SERVER (Node.js)                         │
+│                      backend/server.js :4000                          │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                     Socket.IO Handler                           │  │
+│  │   • receive 'analyze-digit' event                              │  │
+│  │   • forward to FastAPI via Axios                               │  │
+│  │   • broadcast results to all clients                           │  │
+│  └────────────────────────────┬───────────────────────────────────┘  │
+│                               │                                       │
+│                               │ HTTP POST                             │
+│                               ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                    REST API Endpoints                           │  │
+│  │   /api/health  /api/model  /api/analyze  /api/train-step      │  │
+│  └────────────────────────────┬───────────────────────────────────┘  │
+│                               │                                       │
+└───────────────────────────────┼───────────────────────────────────────┘
+                                │
+                                │ HTTP
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                  FASTAPI SERVER (Python)                            │
+│                  backend/ml_server.py :8000                         │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                    ML Inference Engine                         │  │
+│  │   • Load PyTorch model                                         │  │
+│  │   • Forward pass through network                               │  │
+│  │   • Compute gradients (optional)                               │  │
+│  │   • Return activations, predictions, backprop data             │  │
+│  └────────────────────────────┬───────────────────────────────────┘  │
+│                               │                                       │
+│                               ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                    PyTorch Model                              │  │
+│  │   backend/model_utils.py                                       │  │
+│  │   • VisualizerNet (784→96→48→10)                             │  │
+│  │   • Trained weights from mnist_visualizer_model.pth           │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+                                │
+                                │ (optional)
+                                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                    MONGODB ATLAS (Cloud)                            │
+│                 (Optional - falls back to memory)                    │
+│                                                                      │
+│  Database: NumberPredictor                                          │
+│  Collection: predictionHistory                                      │
+│  Stores: {id, createdAt, digit, confidence, probabilities, controls} │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 7. Use Cases
+
+#### For Faculty Demonstrations
+
+1. **Live Drawing**: Draw any digit 0-9 on the canvas and see instant predictions
+2. **Automated Showcase**: Click "Start Showcase" for step-by-step animated explanation
+3. **Layer Manipulation**: Adjust layer scales to see how weights affect predictions
+4. **Bias Override**: Modify output biases to understand neuron competition
+5. **Backprop Visualization**: See gradients and weight updates in real-time
+
+#### For Students Learning
+
+1. **Architecture Understanding**: Visualize 784→96→48→10 network structure
+2. **Activation Flow**: Watch signals propagate through layers
+3. **Weight Visualization**: See heatmaps of learned weights
+4. **Error Analysis**: Understand why the network makes mistakes
+
+#### For Model Experimentation
+
+1. **Live Training**: Apply single training steps with labeled data
+2. **Sensitivity Analysis**: Test how small weight changes affect predictions
+3. **Feature Analysis**: Identify which hidden neurons respond to certain features
+
+### 8. Interactive Controls
+
+| Control         | Location | Range      | Purpose                           |
+| --------------- | -------- | ---------- | --------------------------------- |
+| Brush Radius    | Canvas   | 1-4        | Size of drawing brush             |
+| Brush Strength  | Canvas   | 0.4-1.5    | Drawing intensity                 |
+| Layer Scale 1   | Controls | 0.45-1.75× | Input→Hidden1 weight multiplier   |
+| Layer Scale 2   | Controls | 0.45-1.75× | Hidden1→Hidden2 weight multiplier |
+| Layer Scale 3   | Controls | 0.45-1.75× | Hidden2→Output weight multiplier  |
+| Bias Override   | Controls | -2 to +2   | Add to specific output neuron     |
+| Target Digit    | Controls | 0-9        | Force backprop target             |
+| Backprop Toggle | Controls | On/Off     | Enable gradient computation       |
+| 3D Scene Toggle | Controls | On/Off     | Show/hide 3D visualization        |
+
+### 9. Performance Notes
+
+- **Model Accuracy**: 96.72% on MNIST test set
+- **Inference Speed**: ~10ms per prediction
+- **Frontend Bundle**: ~200KB (main) + ~400KB (Three.js, lazy-loaded)
+- **Socket.IO**: Supports hundreds of concurrent connections
+- **MongoDB Fallback**: Automatically uses in-memory storage if Atlas unavailable
+
+### 10. Environment Variables
+
+| Variable             | Default               | Description                     |
+| -------------------- | --------------------- | ------------------------------- |
+| `PORT`               | 4000                  | Express server port             |
+| `PYTHON_SERVICE_URL` | http://127.0.0.1:8000 | FastAPI endpoint                |
+| `MONGODB_URI`        | (not set)             | MongoDB Atlas connection string |
+| `MONGODB_DB_NAME`    | NumberPredictor       | Database name                   |
+| `MONGODB_COLLECTION` | predictionHistory     | Collection name                 |
+| `MAX_HISTORY`        | 18                    | Maximum history entries         |
+| `VITE_API_BASE_URL`  | (empty)               | Production API URL              |
+| `VITE_SOCKET_URL`    | (empty)               | Production Socket URL           |
