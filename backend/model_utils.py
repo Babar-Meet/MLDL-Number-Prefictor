@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision import datasets
+from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor
 
 
@@ -28,20 +28,27 @@ class VisualizerNet(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(LAYER_SIZES[0], LAYER_SIZES[1])
+        self.drop1 = nn.Dropout(0.25)
         self.fc2 = nn.Linear(LAYER_SIZES[1], LAYER_SIZES[2])
+        self.drop2 = nn.Dropout(0.25)
         self.fc3 = nn.Linear(LAYER_SIZES[2], LAYER_SIZES[3])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.view(x.size(0), -1)
-        hidden_1 = F.relu(self.fc1(x))
-        hidden_2 = F.relu(self.fc2(hidden_1))
+        hidden_1 = self.drop1(F.relu(self.fc1(x)))
+        hidden_2 = self.drop2(F.relu(self.fc2(hidden_1)))
         return self.fc3(hidden_2)
 
 
 def get_data() -> tuple[datasets.MNIST, datasets.MNIST]:
-    transform = ToTensor()
-    training_data = datasets.MNIST(root=str(DATA_DIR), train=True, download=True, transform=transform)
-    test_data = datasets.MNIST(root=str(DATA_DIR), train=False, download=True, transform=transform)
+    train_transform = transforms.Compose([
+        transforms.RandomRotation(12),
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)),
+        ToTensor(),
+    ])
+    test_transform = ToTensor()
+    training_data = datasets.MNIST(root=str(DATA_DIR), train=True, download=True, transform=train_transform)
+    test_data = datasets.MNIST(root=str(DATA_DIR), train=False, download=True, transform=test_transform)
     return training_data, test_data
 
 
@@ -53,14 +60,18 @@ def _state_dict_compatible(model: VisualizerNet, state_dict: dict[str, Any]) -> 
     return True
 
 
-def train_model(num_epochs: int = 4, batch_size: int = 128, learning_rate: float = 0.001) -> VisualizerNet:
+def train_model(num_epochs: int = 6, batch_size: int = 128, learning_rate: float = 0.001) -> VisualizerNet:
     training_data, test_data = get_data()
     train_loader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
     model = VisualizerNet().to(DEVICE)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.5)
     loss_fn = nn.CrossEntropyLoss()
+
+    best_accuracy = 0.0
+    best_state = None
 
     for epoch in range(num_epochs):
         model.train()
@@ -80,10 +91,21 @@ def train_model(num_epochs: int = 4, batch_size: int = 128, learning_rate: float
                 print(f'Epoch {epoch + 1}/{num_epochs} | batch {batch_index} | loss {average_loss:.4f}')
                 running_loss = 0.0
 
-    accuracy = evaluate_model(model, test_loader)
+        scheduler.step()
+        accuracy = evaluate_model(model, test_loader)
+        print(f'Epoch {epoch + 1}/{num_epochs} | accuracy {accuracy:.2%}')
+
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+
+    # Load best checkpoint
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
     torch.save(model.state_dict(), MODEL_PATH)
     print(f'Saved model to {MODEL_PATH}')
-    print(f'Test accuracy: {accuracy:.2%}')
+    print(f'Best test accuracy: {best_accuracy:.2%}')
     return model
 
 

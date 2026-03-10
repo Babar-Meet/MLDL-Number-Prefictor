@@ -32,25 +32,14 @@ import ActivationCharts from "./components/ActivationCharts";
 import DigitCanvas from "./components/DigitCanvas";
 import NetworkGraph from "./components/NetworkGraph";
 import PredictionHistory from "./components/PredictionHistory";
+import { buildHandwrittenDigit } from "./utils/digitGenerator";
 
 const NetworkScene3D = lazy(() => import("./components/NetworkScene3D"));
+const NetworkPipeline3D = lazy(() => import("./components/NetworkPipeline3D"));
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "",
 });
-
-const segmentMap = {
-  0: ["a", "b", "c", "d", "e", "f"],
-  1: ["b", "c"],
-  2: ["a", "b", "g", "e", "d"],
-  3: ["a", "b", "g", "c", "d"],
-  4: ["f", "g", "b", "c"],
-  5: ["a", "f", "g", "c", "d"],
-  6: ["a", "f", "g", "c", "d", "e"],
-  7: ["a", "b", "c"],
-  8: ["a", "b", "c", "d", "e", "f", "g"],
-  9: ["a", "b", "c", "d", "f", "g"],
-};
 
 function createEmptyGrid() {
   return Array.from({ length: 28 }, () => Array(28).fill(0));
@@ -58,73 +47,6 @@ function createEmptyGrid() {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
-}
-
-function paintRect(grid, top, left, height, width, value = 1) {
-  const nextGrid = grid.map((row) => [...row]);
-  for (let row = top; row < top + height; row += 1) {
-    for (let col = left; col < left + width; col += 1) {
-      if (row >= 0 && row < 28 && col >= 0 && col < 28) {
-        nextGrid[row][col] = clamp(value, 0, 1);
-      }
-    }
-  }
-  return nextGrid;
-}
-
-function blurGrid(grid) {
-  return grid.map((row, rowIndex) =>
-    row.map((_, colIndex) => {
-      let total = 0;
-      let count = 0;
-      for (let rowOffset = -1; rowOffset <= 1; rowOffset += 1) {
-        for (let colOffset = -1; colOffset <= 1; colOffset += 1) {
-          const targetRow = rowIndex + rowOffset;
-          const targetCol = colIndex + colOffset;
-          if (
-            targetRow >= 0 &&
-            targetRow < 28 &&
-            targetCol >= 0 &&
-            targetCol < 28
-          ) {
-            total += grid[targetRow][targetCol];
-            count += 1;
-          }
-        }
-      }
-      return total / count;
-    }),
-  );
-}
-
-function buildPresetDigit(digit) {
-  let grid = createEmptyGrid();
-  const segments = segmentMap[digit] ?? segmentMap[8];
-  const thickness = 3;
-
-  if (segments.includes("a")) {
-    grid = paintRect(grid, 3, 7, thickness, 14);
-  }
-  if (segments.includes("b")) {
-    grid = paintRect(grid, 5, 18, 9, thickness);
-  }
-  if (segments.includes("c")) {
-    grid = paintRect(grid, 15, 18, 9, thickness);
-  }
-  if (segments.includes("d")) {
-    grid = paintRect(grid, 22, 7, thickness, 14);
-  }
-  if (segments.includes("e")) {
-    grid = paintRect(grid, 15, 7, 9, thickness);
-  }
-  if (segments.includes("f")) {
-    grid = paintRect(grid, 5, 7, 9, thickness);
-  }
-  if (segments.includes("g")) {
-    grid = paintRect(grid, 12, 7, thickness, 14);
-  }
-
-  return blurGrid(grid);
 }
 
 function emitWithAck(socket, eventName, payload) {
@@ -251,14 +173,17 @@ function App() {
   const [showcaseCaption, setShowcaseCaption] = useState("");
   const [edgeRevealProgress, setEdgeRevealProgress] = useState(null);
   const [edge3DProgress, setEdge3DProgress] = useState(null);
+  const [pipelineAutoPlay, setPipelineAutoPlay] = useState(false);
   const showcaseCancelRef = useRef(false);
 
   // ── Section refs for auto-scroll ──
   const canvasSectionRef = useRef(null);
+
   const networkSectionRef = useRef(null);
   const predictionSectionRef = useRef(null);
   const analysisSectionRef = useRef(null);
   const scene3DRef = useRef(null);
+  const pipelineRef = useRef(null);
   const historySectionRef = useRef(null);
 
   useEffect(() => {
@@ -443,7 +368,7 @@ function App() {
       // Step 1: Auto-draw a random digit
       if (!setStep(1)) return;
       const digit = Math.floor(Math.random() * 10);
-      const targetGrid = buildPresetDigit(digit);
+      const targetGrid = buildHandwrittenDigit(digit);
 
       // Collect non-zero pixels and animate drawing them
       const pixels = [];
@@ -549,7 +474,13 @@ function App() {
         await sleep(80);
       }
       setEdge3DProgress(1);
-      await sleep(2000);
+      await sleep(1000);
+
+      // Step 8.5: Pipeline auto-play
+      scrollToRef(pipelineRef);
+      setPipelineAutoPlay(true);
+      await sleep(4 * 4500 + 1500); // wait for all 4 pipeline steps
+      setPipelineAutoPlay(false);
 
       // Step 9: Complete
       if (!setStep(9)) return;
@@ -562,6 +493,7 @@ function App() {
       }
       setEdgeRevealProgress(null);
       setEdge3DProgress(null);
+      setPipelineAutoPlay(false);
     }
   }, [
     showcaseActive,
@@ -775,7 +707,7 @@ function App() {
                   <button
                     key={digit}
                     className="digit-chip"
-                    onClick={() => setGrid(buildPresetDigit(digit))}
+                    onClick={() => setGrid(buildHandwrittenDigit(digit))}
                   >
                     {digit}
                   </button>
@@ -1140,6 +1072,34 @@ function App() {
                 <NetworkScene3D
                   analysis={deferredAnalysis}
                   edgeRevealProgress={edge3DProgress}
+                />
+              </Suspense>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ═══ PIPELINE 3D ═══ */}
+        <AnimatePresence>
+          {show3D && (
+            <motion.div
+              ref={pipelineRef}
+              className="mt-4"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.4 }}
+            >
+              <Suspense
+                fallback={
+                  <div className="nn-viz-container flex min-h-[240px] items-center justify-center text-sm text-white/40 shimmer">
+                    <Box size={18} className="mr-2 animate-spin" />
+                    Loading pipeline…
+                  </div>
+                }
+              >
+                <NetworkPipeline3D
+                  analysis={deferredAnalysis}
+                  autoPlay={pipelineAutoPlay}
                 />
               </Suspense>
             </motion.div>

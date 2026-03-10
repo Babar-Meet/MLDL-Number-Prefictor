@@ -132,7 +132,7 @@ def train_improved(
     baseline_accuracy = evaluate_model(model, test_loader)
     print(f"Current saved best accuracy: {baseline_accuracy:.2%}")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
     loss_fn = nn.CrossEntropyLoss()
 

@@ -144,9 +144,12 @@ export default function NetworkScene3D({ analysis, edgeRevealProgress }) {
       </div>
 
       <div className="nn-3d-canvas">
-        <Canvas camera={{ position: [10, 3, 10], fov: 40 }}>
+        <Canvas
+          camera={{ position: [14, 4, 14], fov: 50 }}
+          style={{ width: "100%", height: "100%" }}
+        >
           <color attach="background" args={["#0d1117"]} />
-          <fog attach="fog" args={["#0d1117", 30, 50]} />
+          <fog attach="fog" args={["#0d1117", 40, 70]} />
           <ambientLight intensity={1.2} />
           <pointLight position={[8, 10, 8]} intensity={80} color="#00ff9d" />
           <pointLight position={[-8, -6, 8]} intensity={50} color="#7c3aed" />
@@ -185,8 +188,8 @@ export default function NetworkScene3D({ analysis, edgeRevealProgress }) {
 
           <OrbitControls
             enablePan={false}
-            minDistance={8}
-            maxDistance={24}
+            minDistance={6}
+            maxDistance={35}
             autoRotate
             autoRotateSpeed={isShowcase ? 1.5 : 0.5}
           />
